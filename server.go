@@ -1,22 +1,42 @@
 package otgrpc
 
 import (
-	opentracing "github.com/opentracing/opentracing-go"
 	"context"
+	"time"
+
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
+func evaluateSampling(opName string, sp opentracing.Span, opts *options, spanStart time.Time) {
+	if opts.spanInclusionLatencyThreshold == 0 && opts.spanPerOperationLatencyThreshold == nil {
+		return
+	}
+
+	if opts.spanPerOperationLatencyThreshold != nil {
+		operationThreshold := opts.spanPerOperationLatencyThreshold[opName]
+		if operationThreshold > 0 && time.Since(spanStart) < operationThreshold {
+			sp.SetTag("sample", false)
+			return
+		}
+	}
+
+	if opts.spanInclusionLatencyThreshold > 0 && time.Since(spanStart) < opts.spanInclusionLatencyThreshold {
+		sp.SetTag("sample", false)
+	}
+}
+
 // OpenTracingServerInterceptor returns a grpc.UnaryServerInterceptor suitable
 // for use in a grpc.NewServer call.
 //
 // For example:
 //
-//     s := grpc.NewServer(
-//         ...,  // (existing ServerOptions)
-//         grpc.UnaryInterceptor(otgrpc.OpenTracingServerInterceptor(tracer)))
+//	s := grpc.NewServer(
+//	    ...,  // (existing ServerOptions)
+//	    grpc.UnaryInterceptor(otgrpc.OpenTracingServerInterceptor(tracer)))
 //
 // All gRPC server spans will look for an OpenTracing SpanContext in the gRPC
 // metadata; if found, the server span will act as the ChildOf that RPC
@@ -48,7 +68,11 @@ func OpenTracingServerInterceptor(tracer opentracing.Tracer, optFuncs ...Option)
 			ext.RPCServerOption(spanContext),
 			gRPCComponentTag,
 		)
-		defer serverSpan.Finish()
+		dur := time.Now()
+		defer func() {
+			evaluateSampling(info.FullMethod, serverSpan, otgrpcOpts, dur)
+			serverSpan.Finish()
+		}()
 
 		ctx = opentracing.ContextWithSpan(ctx, serverSpan)
 		if otgrpcOpts.logPayloads {
@@ -76,9 +100,9 @@ func OpenTracingServerInterceptor(tracer opentracing.Tracer, optFuncs ...Option)
 //
 // For example:
 //
-//     s := grpc.NewServer(
-//         ...,  // (existing ServerOptions)
-//         grpc.StreamInterceptor(otgrpc.OpenTracingStreamServerInterceptor(tracer)))
+//	s := grpc.NewServer(
+//	    ...,  // (existing ServerOptions)
+//	    grpc.StreamInterceptor(otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 //
 // All gRPC server spans will look for an OpenTracing SpanContext in the gRPC
 // metadata; if found, the server span will act as the ChildOf that RPC

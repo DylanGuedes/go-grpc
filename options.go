@@ -2,6 +2,7 @@ package otgrpc
 
 import (
 	"context"
+	"time"
 
 	opentracing "github.com/opentracing/opentracing-go"
 )
@@ -18,6 +19,18 @@ type Option func(o *options)
 func LogPayloads() Option {
 	return func(o *options) {
 		o.logPayloads = true
+	}
+}
+
+func SpanLatencyThreshold(threshold time.Duration) Option {
+	return func(o *options) {
+		o.spanInclusionLatencyThreshold = threshold
+	}
+}
+
+func PerOperationSpanLatencyThreshold(thresholds map[string]time.Duration) Option {
+	return func(o *options) {
+		o.spanPerOperationLatencyThreshold = thresholds
 	}
 }
 
@@ -63,7 +76,9 @@ type options struct {
 	logPayloads bool
 	decorator   SpanDecoratorFunc
 	// May be nil.
-	inclusionFunc SpanInclusionFunc
+	inclusionFunc                    SpanInclusionFunc
+	spanInclusionLatencyThreshold    time.Duration
+	spanPerOperationLatencyThreshold map[string]time.Duration
 }
 
 // newOptions returns the default options.
